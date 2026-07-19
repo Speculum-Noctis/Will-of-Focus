@@ -672,4 +672,22 @@ function PartyZone({ session }) {
           </p>
         )}
         {friends.map((f) => {
-          const status = STATUS_LABELS[f
+          const status = STATUS_LABELS[f.current_status] || STATUS_LABELS.idle;
+          return (
+            <div className="history-item" key={f.friendshipId}>
+              <span>
+                {status.icon} {f.display_name}
+              </span>
+              <span className="history-date">
+                {status.label} · {timeAgo(f.status_updated_at)}
+              </span>
+              <button className="delete-btn" onClick={() => removeFriend(f.friendshipId)}>
+                Remove
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+                  }
