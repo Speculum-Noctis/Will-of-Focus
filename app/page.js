@@ -489,48 +489,187 @@ function timeAgo(isoString) {
 }
 
 function PartyZone({ session }) {
-  const [members, setMembers] = useState([]);
+  const [friends, setFriends] = useState([]); // accepted, with profile info + status
+  const [incoming, setIncoming] = useState([]); // pending requests sent to me
+  const [outgoing, setOutgoing] = useState([]); // pending requests I sent
   const [loading, setLoading] = useState(true);
 
-  async function loadMembers() {
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, display_name, current_status, status_updated_at, total_exp")
-      .order("display_name", { ascending: true });
-    setMembers(data || []);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchError, setSearchError] = useState("");
+  const [searching, setSearching] = useState(false);
+
+  async function loadFriendData() {
+    const myId = session.user.id;
+
+    const { data: friendships } = await supabase
+      .from("friendships")
+      .select("id, requester_id, addressee_id, status")
+      .or(`requester_id.eq.${myId},addressee_id.eq.${myId}`);
+
+    const rows = friendships || [];
+    const accepted = rows.filter((f) => f.status === "accepted");
+    const incomingPending = rows.filter((f) => f.status === "pending" && f.addressee_id === myId);
+    const outgoingPending = rows.filter((f) => f.status === "pending" && f.requester_id === myId);
+
+    // Figure out the "other person's" id for each row
+    const otherIds = [
+      ...accepted.map((f) => (f.requester_id === myId ? f.addressee_id : f.requester_id)),
+      ...incomingPending.map((f) => f.requester_id),
+      ...outgoingPending.map((f) => f.addressee_id),
+    ];
+
+    let profileMap = {};
+    if (otherIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, display_name, current_status, status_updated_at, total_exp")
+        .in("id", otherIds);
+      (profiles || []).forEach((p) => (profileMap[p.id] = p));
+    }
+
+    setFriends(
+      accepted.map((f) => {
+        const otherId = f.requester_id === myId ? f.addressee_id : f.requester_id;
+        return { friendshipId: f.id, ...profileMap[otherId] };
+      })
+    );
+    setIncoming(
+      incomingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.requester_id] }))
+    );
+    setOutgoing(
+      outgoingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.addressee_id] }))
+    );
     setLoading(false);
   }
 
   useEffect(() => {
-    loadMembers();
-    // Refresh every 8 seconds so party status feels roughly live
-    const interval = setInterval(loadMembers, 8000);
+    loadFriendData();
+    const interval = setInterval(loadFriendData, 8000);
     return () => clearInterval(interval);
   }, []);
 
+  async function handleSearch(e) {
+    e.preventDefault();
+    setSearchError("");
+    setSearchResults([]);
+    if (!searchTerm.trim()) return;
+    setSearching(true);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, display_name")
+      .ilike("display_name", `%${searchTerm.trim()}%`)
+      .neq("id", session.user.id)
+      .limit(10);
+
+    if (error) setSearchError(error.message);
+    setSearchResults(data || []);
+    setSearching(false);
+  }
+
+  async function sendRequest(addresseeId) {
+    setSearchError("");
+    const { error } = await supabase.from("friendships").insert({
+      requester_id: session.user.id,
+      addressee_id: addresseeId,
+      status: "pending",
+    });
+    if (error) {
+      setSearchError(
+        error.code === "23505" ? "You've already sent a request (or are already friends)." : error.message
+      );
+      return;
+    }
+    setSearchResults([]);
+    setSearchTerm("");
+    loadFriendData();
+  }
+
+  async function respondToRequest(friendshipId, accept) {
+    if (accept) {
+      await supabase.from("friendships").update({ status: "accepted" }).eq("id", friendshipId);
+    } else {
+      await supabase.from("friendships").delete().eq("id", friendshipId);
+    }
+    loadFriendData();
+  }
+
+  async function removeFriend(friendshipId) {
+    await supabase.from("friendships").delete().eq("id", friendshipId);
+    loadFriendData();
+  }
+
   return (
     <>
-      <p className="zone-sub">
-        {loading ? "Loading your party…" : "Everyone using The Will of Focus, live-ish."}
-      </p>
-      <div className="card">
-        {members.map((m) => {
-          const status = STATUS_LABELS[m.current_status] || STATUS_LABELS.idle;
-          const isMe = m.id === session.user.id;
-          return (
-            <div className="history-item" key={m.id}>
+      <p className="zone-sub">Add friends, then see what they're up to here.</p>
+
+      <form className="card" onSubmit={handleSearch}>
+        <label htmlFor="friend-search">Find someone by name</label>
+        <div className="log-row">
+          <input
+            id="friend-search"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Their display name"
+          />
+          <button type="submit" disabled={searching}>
+            {searching ? "…" : "Search"}
+          </button>
+        </div>
+        {searchError && <p className="error-text">{searchError}</p>}
+        {searchResults.map((p) => (
+          <div className="history-item" key={p.id}>
+            <span>{p.display_name}</span>
+            <button className="delete-btn" style={{ color: "#f2c879" }} onClick={() => sendRequest(p.id)}>
+              Add friend
+            </button>
+          </div>
+        ))}
+      </form>
+
+      {incoming.length > 0 && (
+        <div className="card">
+          <label>Friend requests</label>
+          {incoming.map((f) => (
+            <div className="history-item" key={f.friendshipId}>
+              <span>{f.display_name}</span>
               <span>
-                {status.icon} {m.display_name}
-                {isMe ? " (you)" : ""}
-              </span>
-              <span className="history-date">
-                {status.label} · {timeAgo(m.status_updated_at)}
+                <button
+                  className="delete-btn"
+                  style={{ color: "#f2c879" }}
+                  onClick={() => respondToRequest(f.friendshipId, true)}
+                >
+                  Accept
+                </button>{" "}
+                <button className="delete-btn" onClick={() => respondToRequest(f.friendshipId, false)}>
+                  Decline
+                </button>
               </span>
             </div>
-          );
-        })}
-        {members.length === 0 && !loading && <p className="zone-sub">Nobody's signed up yet.</p>}
-      </div>
-    </>
-  );
-}
+          ))}
+        </div>
+      )}
+
+      {outgoing.length > 0 && (
+        <div className="card">
+          <label>Pending — waiting on them</label>
+          {outgoing.map((f) => (
+            <div className="history-item" key={f.friendshipId}>
+              <span>{f.display_name}</span>
+              <span className="history-date">Pending</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="card">
+        <label>Your party</label>
+        {loading && <p className="zone-sub">Loading…</p>}
+        {!loading && friends.length === 0 && (
+          <p className="zone-sub" style={{ marginBottom: 0 }}>
+            No friends yet — search for someone above to send a request.
+          </p>
+        )}
+        {friends.map((f) => {
+          const status = STATUS_LABELS[f
