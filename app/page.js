@@ -563,7 +563,82 @@ function timeAgo(isoString) {
   const hours = Math.floor(minutes / 60);
   return `${hours}h ago`;
 }
+function ProfileZone({ session, profile, onUpdated }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
+  const totalExp = profile?.total_exp ?? 0;
+  const progress = getProgressFromExp(totalExp);
+  const rank = getCurrentRank(progress.level);
+  const style = getRankStyle(rank.rank);
+  const avatarId = getAvatarDisplay(profile?.avatar_id);
+
+  async function chooseAvatar(id) {
+    setError("");
+    setSaving(true);
+    const { error } = await supabase.from("profiles").update({ avatar_id: id }).eq("id", session.user.id);
+    if (error) setError(error.message);
+    setSaving(false);
+    onUpdated();
+  }
+
+  return (
+    <>
+      <p className="zone-sub">Your public card — this is what friends see.</p>
+
+      <div className="card" style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 8 }}>{avatarId}</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: style.color }}>
+          <span style={{ marginRight: 6 }}>{style.symbol}</span>
+          {profile?.display_name}
+        </div>
+        <p className="zone-sub" style={{ marginTop: 4, marginBottom: 0 }}>
+          {style.tierName} tier · {rank.name} · Level {progress.level}
+        </p>
+      </div>
+
+      <div className="card">
+        <label>Choose your pfp</label>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          {AVATAR_OPTIONS.map((id) => (
+            <button
+              key={id}
+              onClick={() => chooseAvatar(id)}
+              disabled={saving}
+              style={{
+                fontSize: 28,
+                padding: "8px 10px",
+                borderRadius: 10,
+                border: avatarId === id ? "2px solid #f2c879" : "1px solid rgba(255,255,255,0.15)",
+                background: avatarId === id ? "rgba(242,200,121,0.12)" : "transparent",
+                cursor: "pointer",
+              }}
+            >
+              {id}
+            </button>
+          ))}
+        </div>
+        {error && <p className="error-text">{error}</p>}
+      </div>
+
+      <div className="card">
+        <label>Rank insignia ladder</label>
+        <p className="zone-sub" style={{ marginBottom: 8 }}>
+          Your name color and symbol upgrade automatically as you climb tiers.
+        </p>
+        {RANK_TIERS.map((t) => (
+          <div className="history-item" key={t.tierName}>
+            <span style={{ color: t.color, fontWeight: 600 }}>
+              {t.symbol} {t.tierName}
+            </span>
+            <span className="history-date">up to rank #{t.maxRank}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+              }
+            
 function PartyZone({ session }) {
   const [friends, setFriends] = useState([]); // accepted, with profile info + status
   const [incoming, setIncoming] = useState([]); // pending requests sent to me
