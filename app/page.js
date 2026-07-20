@@ -1,5 +1,6 @@
 "use client";
 
+import { getRankStyle, getAvatarDisplay, RANK_TIERS, AVATAR_OPTIONS } from "@/lib/rankStyle";
 import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
