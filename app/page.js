@@ -1,6 +1,6 @@
-import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
 "use client";
 
+import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getProgressFromExp, getCurrentRank, getNextRank } from "@/lib/levelSystem";
