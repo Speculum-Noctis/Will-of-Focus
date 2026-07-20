@@ -264,3 +264,67 @@ button.secondary {
   border-radius: 999px;
   margin-bottom: 16px;
 }
+
+.zone-nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.zone-tab {
+  width: auto;
+  white-space: nowrap;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--muted-2);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.zone-tab.active {
+  background: var(--accent);
+  color: var(--button-text);
+  border-color: var(--accent);
+}
+
+.zone-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.timer-display {
+  font-size: 40px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--title-text);
+  margin-bottom: 4px;
+}
+
+.timer-label {
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+
+.timer-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.timer-controls button {
+  flex: 1;
+}
+
+.delete-btn {
+  all: unset;
+  color: var(--error);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
