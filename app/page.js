@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import { THEME_OPTIONS } from "@/lib/themes";
 import { getRankStyle, getAvatarDisplay, RANK_TIERS, AVATAR_OPTIONS } from "@/lib/rankStyle";
 import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
-import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { getProgressFromExp, getCurrentRank, getNextRank } from "@/lib/levelSystem";
 
