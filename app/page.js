@@ -422,6 +422,7 @@ function StudyZone({ session, totalExp, logs, onLogged }) {
           ))}
         </div>
       )}
+      <MusicZone />
     </>
   );
 }
@@ -472,7 +473,81 @@ function BreakZone({ session }) {
     </>
   );
 }
+const CURATED_PLAYLISTS = [
+  { id: "37i9dQZF1DWWQRwui0ExPn", label: "Lofi Beats" },
+  { id: "37i9dQZF1DX8Uebhn9wzrS", label: "Chill Lofi Study Beats" },
+  { id: "37i9dQZF1DWZeKCadgRdKQ", label: "Deep Focus" },
+  { id: "37i9dQZF1DX4sWSpwq3LiO", label: "Peaceful Piano" },
+];
 
+function extractSpotifyPlaylistId(input) {
+  const trimmed = input.trim();
+  const match = trimmed.match(/playlist\/([a-zA-Z0-9]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9]+$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+function MusicZone() {
+  const [selectedId, setSelectedId] = useState(CURATED_PLAYLISTS[0].id);
+  const [customUrl, setCustomUrl] = useState("");
+  const [customError, setCustomError] = useState("");
+
+  function handleCustomSubmit(e) {
+    e.preventDefault();
+    setCustomError("");
+    const id = extractSpotifyPlaylistId(customUrl);
+    if (!id) {
+      setCustomError("Paste a Spotify playlist link (or just the playlist ID).");
+      return;
+    }
+    setSelectedId(id);
+    setCustomUrl("");
+  }
+
+  return (
+    <div className="card">
+      <label>Study music</label>
+      <div className="zone-nav" style={{ marginBottom: 12 }}>
+        {CURATED_PLAYLISTS.map((p) => (
+          <button
+            key={p.id}
+            className={`zone-tab ${selectedId === p.id ? "active" : ""}`}
+            onClick={() => setSelectedId(p.id)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <iframe
+        style={{ borderRadius: 12 }}
+        src={`https://open.spotify.com/embed/playlist/${selectedId}?utm_source=generator`}
+        width="100%"
+        height="352"
+        frameBorder="0"
+        allowFullScreen=""
+        allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+        loading="lazy"
+      ></iframe>
+
+      <form onSubmit={handleCustomSubmit} style={{ marginTop: 12 }}>
+        <label htmlFor="custom-playlist">Or paste your own Spotify playlist link</label>
+        <div className="log-row">
+          <input
+            id="custom-playlist"
+            value={customUrl}
+            onChange={(e) => setCustomUrl(e.target.value)}
+            placeholder="https://open.spotify.com/playlist/..."
+          />
+          <button type="submit">Load</button>
+        </div>
+        {customError && <p className="error-text">{customError}</p>}
+      </form>
+    </div>
+  );
+                                                 }
+              
 const STATUS_LABELS = {
   studying: { label: "Studying", icon: "📖" },
   on_break: { label: "On break", icon: "☕" },
