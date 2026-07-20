@@ -171,6 +171,7 @@ const ZONES = [
   { id: "study", label: "📖 Study" },
   { id: "break", label: "☕ Break" },
   { id: "party", label: "👥 Party" },
+  { id: "profile", label: "🪪 Profile" },
 ];
 
 function Dashboard({ session, profile, logs, onLogged }) {
@@ -184,7 +185,10 @@ function Dashboard({ session, profile, logs, onLogged }) {
   return (
     <div className="page">
       <p className="brand">The Will of Focus</p>
-      <h1 className="title">{profile?.display_name || "Loading…"}</h1>
+      <h1 className="title" style={{ color: getRankStyle(rank.rank).color }}>
+  <span style={{ marginRight: 8 }}>{getRankStyle(rank.rank).symbol}</span>
+  {profile?.display_name || "Loading…"}
+</h1>
 
       <div className="zone-nav">
         {ZONES.map((z) => (
@@ -214,6 +218,8 @@ function Dashboard({ session, profile, logs, onLogged }) {
       {zone === "break" && <BreakZone session={session} />}
 
       {zone === "party" && <PartyZone session={session} />}
+
+      {zone === "profile" && <ProfileZone session={session} profile={profile} onUpdated={onLogged} />}
 
       <button className="secondary" onClick={() => supabase.auth.signOut()}>
         Log out
