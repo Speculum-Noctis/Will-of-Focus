@@ -223,7 +223,7 @@ function Dashboard({ session, profile, logs, onLogged }) {
 
       {zone === "profile" && <ProfileZone session={session} profile={profile} onUpdated={onLogged} />}
 
-      {zone === "world" && <WorldZone profile={profile} />}
+      {zone === "world" && <WorldZone profile={profile} onNavigate={setZone} />}
 
       <button className="secondary" onClick={() => supabase.auth.signOut()}>
         Log out
