@@ -174,6 +174,7 @@ const ZONES = [
   { id: "break", label: "☕ Break" },
   { id: "party", label: "👥 Party" },
   { id: "profile", label: "🪪 Profile" },
+  { id: "world", label: "🕹 World" },
 ];
 
 function Dashboard({ session, profile, logs, onLogged }) {
@@ -222,6 +223,8 @@ function Dashboard({ session, profile, logs, onLogged }) {
       {zone === "party" && <PartyZone session={session} />}
 
       {zone === "profile" && <ProfileZone session={session} profile={profile} onUpdated={onLogged} />}
+
+      {zone === "world" && <WorldZone profile={profile} />}
 
       <button className="secondary" onClick={() => supabase.auth.signOut()}>
         Log out
@@ -1255,3 +1258,179 @@ function BossHeader({
   );
     }
     
+function WorldZone({ profile }) {
+  const canvasRef = useRef(null);
+  const keysRef = useRef({ up: false, down: false, left: false, right: false });
+  const playerRef = useRef({ x: 200, y: 150 });
+  const avatarImgRef = useRef(null);
+
+  const ROOM_WIDTH = 360;
+  const ROOM_HEIGHT = 240;
+  const PLAYER_SIZE = 20;
+  const SPEED = 140; // px per second
+
+  const WALLS = [
+    { x: 0, y: 0, w: ROOM_WIDTH, h: 10 }, // top
+    { x: 0, y: ROOM_HEIGHT - 10, w: ROOM_WIDTH, h: 10 }, // bottom
+    { x: 0, y: 0, w: 10, h: ROOM_HEIGHT }, // left
+    { x: ROOM_WIDTH - 10, y: 0, w: 10, h: ROOM_HEIGHT }, // right
+    { x: 140, y: 90, w: 60, h: 40 }, // a desk in the middle, just to prove collision works
+  ];
+
+  function rectsOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  useEffect(() => {
+    if (profile?.avatar_url) {
+      const img = new Image();
+      img.src = profile.avatar_url;
+      img.onload = () => {
+        avatarImgRef.current = img;
+      };
+    } else {
+      avatarImgRef.current = null;
+    }
+  }, [profile?.avatar_url]);
+
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if (["ArrowUp", "w", "W"].includes(e.key)) keysRef.current.up = true;
+      if (["ArrowDown", "s", "S"].includes(e.key)) keysRef.current.down = true;
+      if (["ArrowLeft", "a", "A"].includes(e.key)) keysRef.current.left = true;
+      if (["ArrowRight", "d", "D"].includes(e.key)) keysRef.current.right = true;
+    }
+    function handleKeyUp(e) {
+      if (["ArrowUp", "w", "W"].includes(e.key)) keysRef.current.up = false;
+      if (["ArrowDown", "s", "S"].includes(e.key)) keysRef.current.down = false;
+      if (["ArrowLeft", "a", "A"].includes(e.key)) keysRef.current.left = false;
+      if (["ArrowRight", "d", "D"].includes(e.key)) keysRef.current.right = false;
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    let animationFrameId;
+    let lastTime = performance.now();
+
+    function tick(now) {
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+
+      let dx = 0;
+      let dy = 0;
+      if (keysRef.current.up) dy -= 1;
+      if (keysRef.current.down) dy += 1;
+      if (keysRef.current.left) dx -= 1;
+      if (keysRef.current.right) dx += 1;
+
+      if (dx !== 0 || dy !== 0) {
+        const len = Math.sqrt(dx * dx + dy * dy);
+        dx = (dx / len) * SPEED * dt;
+        dy = (dy / len) * SPEED * dt;
+
+        const p = playerRef.current;
+        const tryMove = (nx, ny) => {
+          const box = { x: nx, y: ny, w: PLAYER_SIZE, h: PLAYER_SIZE };
+          return !WALLS.some((w) => rectsOverlap(box, w));
+        };
+
+        if (tryMove(p.x + dx, p.y)) p.x += dx;
+        if (tryMove(p.x, p.y + dy)) p.y += dy;
+
+        p.x = Math.max(0, Math.min(ROOM_WIDTH - PLAYER_SIZE, p.x));
+        p.y = Math.max(0, Math.min(ROOM_HEIGHT - PLAYER_SIZE, p.y));
+      }
+
+      ctx.fillStyle = "#1b1f27";
+      ctx.fillRect(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+
+      const TILE = 30;
+      for (let ty = 0; ty < ROOM_HEIGHT; ty += TILE) {
+        for (let tx = 0; tx < ROOM_WIDTH; tx += TILE) {
+          ctx.fillStyle = (tx / TILE + ty / TILE) % 2 === 0 ? "#20242e" : "#1b1f27";
+          ctx.fillRect(tx, ty, TILE, TILE);
+        }
+      }
+
+      ctx.fillStyle = "#2a2f3a";
+      WALLS.forEach((w) => ctx.fillRect(w.x, w.y, w.w, w.h));
+
+      const p = playerRef.current;
+      if (avatarImgRef.current) {
+        ctx.drawImage(avatarImgRef.current, p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+      } else {
+        ctx.font = `${PLAYER_SIZE}px sans-serif`;
+        ctx.textBaseline = "top";
+        ctx.fillText(profile?.avatar_id || "🧑‍🎓", p.x, p.y);
+      }
+
+      animationFrameId = requestAnimationFrame(tick);
+    }
+
+    animationFrameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [profile?.avatar_id]);
+
+  function pressKey(dir, isDown) {
+    keysRef.current[dir] = isDown;
+  }
+
+  return (
+    <>
+      <p className="zone-sub">Walk around your dorm. Arrow keys / WASD on desktop, buttons below on mobile.</p>
+      <div className="card" style={{ display: "flex", justifyContent: "center" }}>
+        <canvas
+          ref={canvasRef}
+          width={ROOM_WIDTH}
+          height={ROOM_HEIGHT}
+          style={{ borderRadius: 10, touchAction: "none" }}
+        />
+      </div>
+
+      <div className="card">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 8,
+            maxWidth: 200,
+            margin: "0 auto",
+          }}
+        >
+          <div />
+          <TouchButton label="▲" onDown={() => pressKey("up", true)} onUp={() => pressKey("up", false)} />
+          <div />
+          <TouchButton label="◀" onDown={() => pressKey("left", true)} onUp={() => pressKey("left", false)} />
+          <div />
+          <TouchButton label="▶" onDown={() => pressKey("right", true)} onUp={() => pressKey("right", false)} />
+          <div />
+          <TouchButton label="▼" onDown={() => pressKey("down", true)} onUp={() => pressKey("down", false)} />
+          <div />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TouchButton({ label, onDown, onUp }) {
+  return (
+    <button
+      className="secondary"
+      onPointerDown={onDown}
+      onPointerUp={onUp}
+      onPointerLeave={onUp}
+      style={{ fontSize: 18, padding: "14px 0" }}
+    >
+      {label}
+    </button>
+  );
+                          }
+        
