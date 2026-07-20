@@ -578,14 +578,77 @@ function ProfileZone({ session, profile, onUpdated }) {
   const progress = getProgressFromExp(totalExp);
   const rank = getCurrentRank(progress.level);
   const style = getRankStyle(rank.rank);
-  const avatarId = getAvatarDisplay(profile?.avatar_id);
+  const presetAvatar = getAvatarDisplay(profile?.avatar_id);
+  const hasUploadedPhoto = Boolean(profile?.avatar_url);
+  const currentTheme = profile?.theme || "ember";
 
   async function chooseAvatar(id) {
     setError("");
     setSaving(true);
-    const { error } = await supabase.from("profiles").update({ avatar_id: id }).eq("id", session.user.id);
+    // Picking a preset clears any uploaded photo, so the preset actually shows.
+    const { error } = await supabase
+      .from("profiles")
+      .update({ avatar_id: id, avatar_url: null })
+      .eq("id", session.user.id);
     if (error) setError(error.message);
     setSaving(false);
+    onUpdated();
+  }
+
+  async function handlePhotoUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError("");
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image must be under 5MB.");
+      return;
+    }
+
+    setSaving(true);
+    const fileExt = file.name.split(".").pop();
+    const filePath = `${session.user.id}/avatar.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("avatars")
+      .upload(filePath, file, { upsert: true, cacheControl: "3600" });
+
+    if (uploadError) {
+      setError(uploadError.message);
+      setSaving(false);
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
+    const bustedUrl = `${publicUrlData.publicUrl}?t=${Date.now()}`;
+
+    const { error: updateError } = await supabase
+      .from("profiles")
+      .update({ avatar_url: bustedUrl })
+      .eq("id", session.user.id);
+
+    if (updateError) setError(updateError.message);
+    setSaving(false);
+    onUpdated();
+  }
+
+  async function removePhoto() {
+    setError("");
+    setSaving(true);
+    const { error } = await supabase.from("profiles").update({ avatar_url: null }).eq("id", session.user.id);
+    if (error) setError(error.message);
+    setSaving(false);
+    onUpdated();
+  }
+
+  async function chooseTheme(id) {
+    setError("");
+    const { error } = await supabase.from("profiles").update({ theme: id }).eq("id", session.user.id);
+    if (error) setError(error.message);
     onUpdated();
   }
 
@@ -594,7 +657,23 @@ function ProfileZone({ session, profile, onUpdated }) {
       <p className="zone-sub">Your public card — this is what friends see.</p>
 
       <div className="card" style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 64, marginBottom: 8 }}>{avatarId}</div>
+        {hasUploadedPhoto ? (
+          <img
+            src={profile.avatar_url}
+            alt="Your profile photo"
+            style={{
+              width: 88,
+              height: 88,
+              borderRadius: "50%",
+              objectFit: "cover",
+              margin: "0 auto 8px",
+              border: `2px solid ${style.color}`,
+            }}
+          />
+        ) : (
+          <div style={{ fontSize: 64, marginBottom: 8 }}>{presetAvatar}</div>
+        )}
+
         <div style={{ fontSize: 22, fontWeight: 700, color: style.color }}>
           <span style={{ marginRight: 6 }}>{style.symbol}</span>
           {profile?.display_name}
@@ -605,7 +684,17 @@ function ProfileZone({ session, profile, onUpdated }) {
       </div>
 
       <div className="card">
-        <label>Choose your pfp</label>
+        <label>Upload a photo</label>
+        <input type="file" accept="image/*" onChange={handlePhotoUpload} disabled={saving} />
+        {hasUploadedPhoto && (
+          <button className="secondary" onClick={removePhoto} disabled={saving} style={{ marginTop: 8 }}>
+            Remove photo (use preset instead)
+          </button>
+        )}
+      </div>
+
+      <div className="card">
+        <label>Or choose a preset pfp</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
           {AVATAR_OPTIONS.map((id) => (
             <button
@@ -616,8 +705,11 @@ function ProfileZone({ session, profile, onUpdated }) {
                 fontSize: 28,
                 padding: "8px 10px",
                 borderRadius: 10,
-                border: avatarId === id ? "2px solid #f2c879" : "1px solid rgba(255,255,255,0.15)",
-                background: avatarId === id ? "rgba(242,200,121,0.12)" : "transparent",
+                border:
+                  !hasUploadedPhoto && presetAvatar === id
+                    ? "2px solid #f2c879"
+                    : "1px solid rgba(255,255,255,0.15)",
+                background: !hasUploadedPhoto && presetAvatar === id ? "rgba(242,200,121,0.12)" : "transparent",
                 cursor: "pointer",
               }}
             >
@@ -626,6 +718,31 @@ function ProfileZone({ session, profile, onUpdated }) {
           ))}
         </div>
         {error && <p className="error-text">{error}</p>}
+      </div>
+
+      <div className="card">
+        <label>App theme</label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+          {THEME_OPTIONS.map((t) => (
+            <button
+              key={t.id}
+              className={currentTheme === t.id ? "" : "secondary"}
+              onClick={() => chooseTheme(t.id)}
+              style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10 }}
+            >
+              <span
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: t.swatch,
+                  display: "inline-block",
+                }}
+              />
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="card">
@@ -644,7 +761,8 @@ function ProfileZone({ session, profile, onUpdated }) {
       </div>
     </>
   );
-              }
+  }
+      
             
 function PartyZone({ session }) {
   const [friends, setFriends] = useState([]); // accepted, with profile info + status
