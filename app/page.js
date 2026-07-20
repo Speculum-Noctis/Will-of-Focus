@@ -1,3 +1,4 @@
+import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -499,6 +500,15 @@ function PartyZone({ session }) {
   const [searchError, setSearchError] = useState("");
   const [searching, setSearching] = useState(false);
 
+  // ── Squad / weekly boss state ──
+  const [myMembership, setMyMembership] = useState(null); // my row in party_members, or null
+  const [squadMembers, setSquadMembers] = useState([]); // accepted members of my squad
+  const [squadPending, setSquadPending] = useState([]); // invited-not-yet-accepted members of my squad
+  const [weekHoursByUser, setWeekHoursByUser] = useState({});
+  const [squadName, setSquadName] = useState("");
+  const [squadError, setSquadError] = useState("");
+  const [squadBusy, setSquadBusy] = useState(false);
+
   async function loadFriendData() {
     const myId = session.user.id;
 
@@ -512,7 +522,6 @@ function PartyZone({ session }) {
     const incomingPending = rows.filter((f) => f.status === "pending" && f.addressee_id === myId);
     const outgoingPending = rows.filter((f) => f.status === "pending" && f.requester_id === myId);
 
-    // Figure out the "other person's" id for each row
     const otherIds = [
       ...accepted.map((f) => (f.requester_id === myId ? f.addressee_id : f.requester_id)),
       ...incomingPending.map((f) => f.requester_id),
@@ -534,18 +543,69 @@ function PartyZone({ session }) {
         return { friendshipId: f.id, ...profileMap[otherId] };
       })
     );
-    setIncoming(
-      incomingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.requester_id] }))
-    );
-    setOutgoing(
-      outgoingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.addressee_id] }))
-    );
+    setIncoming(incomingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.requester_id] })));
+    setOutgoing(outgoingPending.map((f) => ({ friendshipId: f.id, ...profileMap[f.addressee_id] })));
     setLoading(false);
+  }
+
+  async function loadSquadData() {
+    const myId = session.user.id;
+
+    // Do I belong to a party at all (invited or accepted)?
+    const { data: mine } = await supabase
+      .from("party_members")
+      .select("id, party_id, status, parties(id, name, created_by)")
+      .eq("user_id", myId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!mine) {
+      setMyMembership(null);
+      setSquadMembers([]);
+      setSquadPending([]);
+      setWeekHoursByUser({});
+      return;
+    }
+    setMyMembership(mine);
+
+    const { data: allRows } = await supabase
+      .from("party_members")
+      .select("id, user_id, status, profiles(id, display_name)")
+      .eq("party_id", mine.party_id);
+
+    const rows = allRows || [];
+    const accepted = rows.filter((r) => r.status === "accepted");
+    const invited = rows.filter((r) => r.status === "invited");
+    setSquadMembers(accepted);
+    setSquadPending(invited);
+
+    if (accepted.length > 0) {
+      const { start, end } = getCurrentWeekRange();
+      const acceptedIds = accepted.map((r) => r.user_id);
+      const { data: weekLogs } = await supabase
+        .from("study_logs")
+        .select("user_id, hours")
+        .in("user_id", acceptedIds)
+        .gte("logged_date", start)
+        .lte("logged_date", end);
+
+      const totals = {};
+      (weekLogs || []).forEach((log) => {
+        totals[log.user_id] = (totals[log.user_id] || 0) + Number(log.hours);
+      });
+      setWeekHoursByUser(totals);
+    } else {
+      setWeekHoursByUser({});
+    }
   }
 
   useEffect(() => {
     loadFriendData();
-    const interval = setInterval(loadFriendData, 8000);
+    loadSquadData();
+    const interval = setInterval(() => {
+      loadFriendData();
+      loadSquadData();
+    }, 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -599,6 +659,90 @@ function PartyZone({ session }) {
     await supabase.from("friendships").delete().eq("id", friendshipId);
     loadFriendData();
   }
+
+  // ── Squad actions ──
+  async function createSquad(e) {
+    e.preventDefault();
+    setSquadError("");
+    if (!squadName.trim()) {
+      setSquadError("Give your squad a name.");
+      return;
+    }
+    setSquadBusy(true);
+
+    const { data: party, error: partyErr } = await supabase
+      .from("parties")
+      .insert({ name: squadName.trim(), created_by: session.user.id })
+      .select()
+      .single();
+
+    if (partyErr) {
+      setSquadError(partyErr.message);
+      setSquadBusy(false);
+      return;
+    }
+
+    const { error: memberErr } = await supabase.from("party_members").insert({
+      party_id: party.id,
+      user_id: session.user.id,
+      status: "accepted",
+      invited_by: session.user.id,
+    });
+
+    if (memberErr) setSquadError(memberErr.message);
+
+    setSquadName("");
+    setSquadBusy(false);
+    loadSquadData();
+  }
+
+  async function inviteFriendToSquad(friendUserId) {
+    setSquadError("");
+    if (!myMembership) return;
+    const currentCount = squadMembers.length + squadPending.length;
+    if (currentCount >= 5) {
+      setSquadError("Squad is full (max 5).");
+      return;
+    }
+
+    const { error } = await supabase.from("party_members").insert({
+      party_id: myMembership.party_id,
+      user_id: friendUserId,
+      status: "invited",
+      invited_by: session.user.id,
+    });
+
+    if (error) {
+      setSquadError(
+        error.code === "23505" ? "They're already in this squad." : error.message
+      );
+      return;
+    }
+    loadSquadData();
+  }
+
+  async function respondToSquadInvite(accept) {
+    if (!myMembership) return;
+    if (accept) {
+      await supabase.from("party_members").update({ status: "accepted" }).eq("id", myMembership.id);
+    } else {
+      await supabase.from("party_members").delete().eq("id", myMembership.id);
+    }
+    loadSquadData();
+  }
+
+  async function leaveSquad() {
+    if (!myMembership) return;
+    const confirmed = window.confirm("Leave this squad? You'll stop contributing to its weekly boss.");
+    if (!confirmed) return;
+    await supabase.from("party_members").delete().eq("id", myMembership.id);
+    loadSquadData();
+  }
+
+  const squadFull = squadMembers.length + squadPending.length >= 5;
+  const invitableFriends = friends.filter(
+    (f) => !squadMembers.some((m) => m.user_id === f.id) && !squadPending.some((m) => m.user_id === f.id)
+  );
 
   return (
     <>
@@ -688,6 +832,149 @@ function PartyZone({ session }) {
           );
         })}
       </div>
+
+      {/* ── Squad / Weekly Boss ── */}
+      {!myMembership && (
+        <form className="card" onSubmit={createSquad}>
+          <label htmlFor="squad-name">Start a squad (3–5 people) for the weekly boss</label>
+          <div className="log-row">
+            <input
+              id="squad-name"
+              value={squadName}
+              onChange={(e) => setSquadName(e.target.value)}
+              placeholder="Squad name"
+            />
+            <button type="submit" disabled={squadBusy}>
+              {squadBusy ? "…" : "Create"}
+            </button>
+          </div>
+          {squadError && <p className="error-text">{squadError}</p>}
+        </form>
+      )}
+
+      {myMembership && myMembership.status === "invited" && (
+        <div className="card">
+          <label>Squad invite</label>
+          <p className="zone-sub" style={{ marginBottom: 8 }}>
+            You've been invited to join <strong>{myMembership.parties?.name}</strong>.
+          </p>
+          <div className="timer-controls">
+            <button onClick={() => respondToSquadInvite(true)}>Accept</button>
+            <button className="secondary" onClick={() => respondToSquadInvite(false)}>
+              Decline
+            </button>
+          </div>
+        </div>
+      )}
+
+      {myMembership && myMembership.status === "accepted" && (
+        <BossHeader
+          squadName={myMembership.parties?.name}
+          squadMembers={squadMembers}
+          squadPending={squadPending}
+          weekHoursByUser={weekHoursByUser}
+          myUserId={session.user.id}
+          invitableFriends={invitableFriends}
+          squadFull={squadFull}
+          squadError={squadError}
+          onInvite={inviteFriendToSquad}
+          onLeave={leaveSquad}
+        />
+      )}
     </>
   );
-                  }
+}
+
+function BossHeader({
+  squadName,
+  squadMembers,
+  squadPending,
+  weekHoursByUser,
+  myUserId,
+  invitableFriends,
+  squadFull,
+  squadError,
+  onInvite,
+  onLeave,
+}) {
+  const totalHours = squadMembers.reduce((sum, m) => sum + (weekHoursByUser[m.user_id] || 0), 0);
+  const boss = getBossState(squadMembers.length, totalHours);
+  const belowMinSize = squadMembers.length < 3;
+
+  return (
+    <div className="card">
+      <div className="rank-line">
+        <span className="rank-name">🗡 Weekly Boss — {squadName}</span>
+        <span className="level-badge">{squadMembers.length} in squad</span>
+      </div>
+
+      {belowMinSize ? (
+        <p className="zone-sub" style={{ marginBottom: 8 }}>
+          Need at least 3 accepted members before the boss fight starts. Invite more friends below.
+        </p>
+      ) : (
+        <>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{ width: `${boss.percent}%`, background: boss.defeated ? "#7ee787" : undefined }}
+            />
+          </div>
+          <div className="bar-caption">
+            <span>
+              {boss.defeated
+                ? "Boss defeated this week! 🎉"
+                : `${boss.hoursLogged.toFixed(1)} / ${boss.threshold} hrs`}
+            </span>
+            <span>{boss.hoursRemaining.toFixed(1)} hrs left</span>
+          </div>
+        </>
+      )}
+
+      <div style={{ marginTop: 12 }}>
+        {squadMembers.map((m) => {
+          const hrs = weekHoursByUser[m.user_id] || 0;
+          const metFairShare = hrs >= 30;
+          return (
+            <div className="history-item" key={m.id}>
+              <span>
+                {m.profiles?.display_name}
+                {m.user_id === myUserId ? " (you)" : ""}
+              </span>
+              <span className="history-date">
+                {hrs.toFixed(1)} / 30 hrs {metFairShare ? "✅" : ""}
+              </span>
+            </div>
+          );
+        })}
+        {squadPending.map((m) => (
+          <div className="history-item" key={m.id}>
+            <span style={{ opacity: 0.6 }}>{m.profiles?.display_name}</span>
+            <span className="history-date">Invited — pending</span>
+          </div>
+        ))}
+      </div>
+
+      {squadError && <p className="error-text">{squadError}</p>}
+
+      {!squadFull && invitableFriends.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <label>Invite a friend</label>
+          {invitableFriends.map((f) => (
+            <div className="history-item" key={f.id}>
+              <span>{f.display_name}</span>
+              <button className="delete-btn" style={{ color: "#f2c879" }} onClick={() => onInvite(f.id)}>
+                Invite
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="secondary" style={{ marginTop: 12 }} onClick={onLeave}>
+        Leave squad
+      </button>
+    </div>
+  );
+    }
+    
