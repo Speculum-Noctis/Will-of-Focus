@@ -1256,29 +1256,110 @@ function BossHeader({
     </div>
   );
     }
-    
-function WorldZone({ profile }) {
+
+// ── Phase 2: fullscreen world, analog joystick, doors that navigate
+// straight into your existing Study/Break/Party/Profile tabs. ──
+
+const DOORS = [
+  { id: "study", label: "📖 Study", fx: 0.5, fy: 0.15 },
+  { id: "break", label: "☕ Break", fx: 0.15, fy: 0.5 },
+  { id: "party", label: "👥 Party", fx: 0.85, fy: 0.5 },
+  { id: "profile", label: "🪪 Profile", fx: 0.5, fy: 0.85 },
+];
+const DOOR_SIZE = 64;
+
+function Joystick({ onChange }) {
+  const baseRef = useRef(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const draggingRef = useRef(false);
+  const centerRef = useRef({ x: 0, y: 0 });
+  const RADIUS = 42;
+
+  function handlePointerDown(e) {
+    const rect = baseRef.current.getBoundingClientRect();
+    centerRef.current = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    draggingRef.current = true;
+    baseRef.current.setPointerCapture(e.pointerId);
+    handlePointerMove(e);
+  }
+
+  function handlePointerMove(e) {
+    if (!draggingRef.current) return;
+    let dx = e.clientX - centerRef.current.x;
+    let dy = e.clientY - centerRef.current.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > RADIUS) {
+      dx = (dx / dist) * RADIUS;
+      dy = (dy / dist) * RADIUS;
+    }
+    setKnob({ x: dx, y: dy });
+    onChange({ x: dx / RADIUS, y: dy / RADIUS });
+  }
+
+  function handlePointerUp() {
+    draggingRef.current = false;
+    setKnob({ x: 0, y: 0 });
+    onChange({ x: 0, y: 0 });
+  }
+
+  return (
+    <div
+      ref={baseRef}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      style={{
+        position: "absolute",
+        left: 28,
+        bottom: 36,
+        width: 96,
+        height: 96,
+        borderRadius: "50%",
+        background: "rgba(255,255,255,0.10)",
+        border: "2px solid rgba(255,255,255,0.25)",
+        touchAction: "none",
+        zIndex: 2,
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          left: 48 + knob.x - 21,
+          top: 48 + knob.y - 21,
+          width: 42,
+          height: 42,
+          borderRadius: "50%",
+          background: "rgba(255,255,255,0.85)",
+        }}
+      />
+    </div>
+  );
+}
+
+function WorldZone({ profile, onNavigate }) {
   const canvasRef = useRef(null);
   const keysRef = useRef({ up: false, down: false, left: false, right: false });
-  const playerRef = useRef({ x: 200, y: 150 });
+  const joystickRef = useRef({ x: 0, y: 0 });
+  const playerRef = useRef({ x: 100, y: 100 });
   const avatarImgRef = useRef(null);
+  const lastDoorRef = useRef(null);
+  const onNavigateRef = useRef(onNavigate);
+  onNavigateRef.current = onNavigate;
 
-  const ROOM_WIDTH = 360;
-  const ROOM_HEIGHT = 240;
-  const PLAYER_SIZE = 20;
-  const SPEED = 140; // px per second
+  const [dims, setDims] = useState({ width: 360, height: 600 });
+  const PLAYER_SIZE = 28;
+  const SPEED = 180;
+  const WALL_THICKNESS = 14;
 
-  const WALLS = [
-    { x: 0, y: 0, w: ROOM_WIDTH, h: 10 }, // top
-    { x: 0, y: ROOM_HEIGHT - 10, w: ROOM_WIDTH, h: 10 }, // bottom
-    { x: 0, y: 0, w: 10, h: ROOM_HEIGHT }, // left
-    { x: ROOM_WIDTH - 10, y: 0, w: 10, h: ROOM_HEIGHT }, // right
-    { x: 140, y: 90, w: 60, h: 40 }, // a desk in the middle, just to prove collision works
-  ];
-
-  function rectsOverlap(a, b) {
-    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-  }
+  useEffect(() => {
+    function updateDims() {
+      setDims({ width: window.innerWidth, height: window.innerHeight });
+    }
+    updateDims();
+    window.addEventListener("resize", updateDims);
+    return () => window.removeEventListener("resize", updateDims);
+  }, []);
 
   useEffect(() => {
     if (profile?.avatar_url) {
@@ -1315,7 +1396,34 @@ function WorldZone({ profile }) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    canvas.width = dims.width;
+    canvas.height = dims.height;
+
+    // Keep the player inside bounds if the window resized around them
+    playerRef.current.x = Math.max(0, Math.min(dims.width - PLAYER_SIZE, playerRef.current.x));
+    playerRef.current.y = Math.max(0, Math.min(dims.height - PLAYER_SIZE, playerRef.current.y));
+
+    const WALLS = [
+      { x: 0, y: 0, w: dims.width, h: WALL_THICKNESS },
+      { x: 0, y: dims.height - WALL_THICKNESS, w: dims.width, h: WALL_THICKNESS },
+      { x: 0, y: 0, w: WALL_THICKNESS, h: dims.height },
+      { x: dims.width - WALL_THICKNESS, y: 0, w: WALL_THICKNESS, h: dims.height },
+    ];
+
+    const doorRects = DOORS.map((d) => ({
+      ...d,
+      x: d.fx * dims.width - DOOR_SIZE / 2,
+      y: d.fy * dims.height - DOOR_SIZE / 2,
+      w: DOOR_SIZE,
+      h: DOOR_SIZE,
+    }));
+
+    function rectsOverlap(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
     let animationFrameId;
     let lastTime = performance.now();
 
@@ -1329,32 +1437,45 @@ function WorldZone({ profile }) {
       if (keysRef.current.down) dy += 1;
       if (keysRef.current.left) dx -= 1;
       if (keysRef.current.right) dx += 1;
+      dx += joystickRef.current.x;
+      dy += joystickRef.current.y;
 
-      if (dx !== 0 || dy !== 0) {
-        const len = Math.sqrt(dx * dx + dy * dy);
-        dx = (dx / len) * SPEED * dt;
-        dy = (dy / len) * SPEED * dt;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len > 0.05) {
+        const normX = (dx / len) * Math.min(len, 1) * SPEED * dt;
+        const normY = (dy / len) * Math.min(len, 1) * SPEED * dt;
 
         const p = playerRef.current;
         const tryMove = (nx, ny) => {
           const box = { x: nx, y: ny, w: PLAYER_SIZE, h: PLAYER_SIZE };
           return !WALLS.some((w) => rectsOverlap(box, w));
         };
+        if (tryMove(p.x + normX, p.y)) p.x += normX;
+        if (tryMove(p.x, p.y + normY)) p.y += normY;
 
-        if (tryMove(p.x + dx, p.y)) p.x += dx;
-        if (tryMove(p.x, p.y + dy)) p.y += dy;
-
-        p.x = Math.max(0, Math.min(ROOM_WIDTH - PLAYER_SIZE, p.x));
-        p.y = Math.max(0, Math.min(ROOM_HEIGHT - PLAYER_SIZE, p.y));
+        p.x = Math.max(0, Math.min(dims.width - PLAYER_SIZE, p.x));
+        p.y = Math.max(0, Math.min(dims.height - PLAYER_SIZE, p.y));
       }
 
-      ctx.fillStyle = "#1b1f27";
-      ctx.fillRect(0, 0, ROOM_WIDTH, ROOM_HEIGHT);
+      // Door detection — navigate away the moment we walk into one
+      const p = playerRef.current;
+      const playerBox = { x: p.x, y: p.y, w: PLAYER_SIZE, h: PLAYER_SIZE };
+      const hitDoor = doorRects.find((d) => rectsOverlap(playerBox, d));
+      if (hitDoor && lastDoorRef.current !== hitDoor.id) {
+        lastDoorRef.current = hitDoor.id;
+        onNavigateRef.current(hitDoor.id);
+        return; // stop this loop; component will unmount as the zone switches
+      }
+      if (!hitDoor) lastDoorRef.current = null;
 
-      const TILE = 30;
-      for (let ty = 0; ty < ROOM_HEIGHT; ty += TILE) {
-        for (let tx = 0; tx < ROOM_WIDTH; tx += TILE) {
-          ctx.fillStyle = (tx / TILE + ty / TILE) % 2 === 0 ? "#20242e" : "#1b1f27";
+      // ── Draw ──
+      ctx.fillStyle = "#10160f";
+      ctx.fillRect(0, 0, dims.width, dims.height);
+
+      const TILE = 36;
+      for (let ty = 0; ty < dims.height; ty += TILE) {
+        for (let tx = 0; tx < dims.width; tx += TILE) {
+          ctx.fillStyle = (Math.floor(tx / TILE) + Math.floor(ty / TILE)) % 2 === 0 ? "#16201a" : "#131b16";
           ctx.fillRect(tx, ty, TILE, TILE);
         }
       }
@@ -1362,74 +1483,70 @@ function WorldZone({ profile }) {
       ctx.fillStyle = "#2a2f3a";
       WALLS.forEach((w) => ctx.fillRect(w.x, w.y, w.w, w.h));
 
-      const p = playerRef.current;
+      doorRects.forEach((d) => {
+        ctx.fillStyle = "rgba(242,200,121,0.18)";
+        ctx.fillRect(d.x, d.y, d.w, d.h);
+        ctx.strokeStyle = "rgba(242,200,121,0.6)";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(d.x, d.y, d.w, d.h);
+        ctx.font = "13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#f4f1ea";
+        ctx.fillText(d.label, d.x + d.w / 2, d.y - 8);
+      });
+      ctx.textAlign = "left";
+
       if (avatarImgRef.current) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(p.x + PLAYER_SIZE / 2, p.y + PLAYER_SIZE / 2, PLAYER_SIZE / 2, 0, Math.PI * 2);
+        ctx.clip();
         ctx.drawImage(avatarImgRef.current, p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+        ctx.restore();
       } else {
         ctx.font = `${PLAYER_SIZE}px sans-serif`;
         ctx.textBaseline = "top";
         ctx.fillText(profile?.avatar_id || "🧑‍🎓", p.x, p.y);
       }
 
+      ctx.font = "bold 12px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#f2c879";
+      ctx.fillText(profile?.display_name || "You", p.x + PLAYER_SIZE / 2, p.y + PLAYER_SIZE + 14);
+      ctx.textAlign = "left";
+
       animationFrameId = requestAnimationFrame(tick);
     }
 
     animationFrameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [profile?.avatar_id]);
-
-  function pressKey(dir, isDown) {
-    keysRef.current[dir] = isDown;
-  }
+  }, [dims, profile?.avatar_id, profile?.display_name]);
 
   return (
-    <>
-      <p className="zone-sub">Walk around your dorm. Arrow keys / WASD on desktop, buttons below on mobile.</p>
-      <div className="card" style={{ display: "flex", justifyContent: "center" }}>
-        <canvas
-          ref={canvasRef}
-          width={ROOM_WIDTH}
-          height={ROOM_HEIGHT}
-          style={{ borderRadius: 10, touchAction: "none" }}
-        />
-      </div>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "#10160f" }}>
+      <canvas ref={canvasRef} style={{ display: "block" }} />
 
-      <div className="card">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 8,
-            maxWidth: 200,
-            margin: "0 auto",
-          }}
-        >
-          <div />
-          <TouchButton label="▲" onDown={() => pressKey("up", true)} onUp={() => pressKey("up", false)} />
-          <div />
-          <TouchButton label="◀" onDown={() => pressKey("left", true)} onUp={() => pressKey("left", false)} />
-          <div />
-          <TouchButton label="▶" onDown={() => pressKey("right", true)} onUp={() => pressKey("right", false)} />
-          <div />
-          <TouchButton label="▼" onDown={() => pressKey("down", true)} onUp={() => pressKey("down", false)} />
-          <div />
-        </div>
-      </div>
-    </>
-  );
-}
+      <button
+        onClick={() => onNavigate("dorm")}
+        style={{
+          position: "absolute",
+          top: 20,
+          left: 20,
+          width: 44,
+          height: 44,
+          borderRadius: "50%",
+          background: "rgba(0,0,0,0.45)",
+          border: "1px solid rgba(255,255,255,0.2)",
+          color: "#fff",
+          fontSize: 20,
+          zIndex: 2,
+        }}
+      >
+        ←
+      </button>
 
-function TouchButton({ label, onDown, onUp }) {
-  return (
-    <button
-      className="secondary"
-      onPointerDown={onDown}
-      onPointerUp={onUp}
-      onPointerLeave={onUp}
-      style={{ fontSize: 18, padding: "14px 0" }}
-    >
-      {label}
-    </button>
+      <Joystick onChange={(v) => (joystickRef.current = v)} />
+    </div>
   );
-                          }
-        
+           }
+      
