@@ -1,5 +1,6 @@
 "use client";
 
+import { THEME_OPTIONS } from "@/lib/themes";
 import { getRankStyle, getAvatarDisplay, RANK_TIERS, AVATAR_OPTIONS } from "@/lib/rankStyle";
 import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
 import { useEffect, useState } from "react";
@@ -183,7 +184,7 @@ function Dashboard({ session, profile, logs, onLogged }) {
   const nextRank = getNextRank(progress.level);
 
   return (
-    <div className="page">
+    <div className="page" data-theme={profile?.theme || "ember"}>
       <p className="brand">The Will of Focus</p>
       <h1 className="title" style={{ color: getRankStyle(rank.rank).color }}>
   <span style={{ marginRight: 8 }}>{getRankStyle(rank.rank).symbol}</span>
