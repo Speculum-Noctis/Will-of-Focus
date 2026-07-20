@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState, useRef } from "react";
 import { THEME_OPTIONS } from "@/lib/themes";
 import { getRankStyle, getAvatarDisplay, RANK_TIERS, AVATAR_OPTIONS } from "@/lib/rankStyle";
 import { getCurrentWeekRange, getBossState } from "@/lib/partySystem";
