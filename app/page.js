@@ -1343,6 +1343,7 @@ function WorldZone({ profile, onNavigate }) {
   const playerRef = useRef({ x: 100, y: 100 });
   const avatarImgRef = useRef(null);
   const grassPatternRef = useRef(null);
+  const pathPatternRef = useRef(null);
   const buildingImgsRef = useRef({});
   const assetsReadyRef = useRef(false);
   const lastDoorRef = useRef(null);
@@ -1378,7 +1379,7 @@ function WorldZone({ profile, onNavigate }) {
   // Load grass tile + all building sprites once
   useEffect(() => {
     let loaded = 0;
-    const total = 1 + BUILDINGS.length;
+    const total = 2 + BUILDINGS.length;
     function markLoaded() {
       loaded += 1;
       if (loaded >= total) assetsReadyRef.current = true;
@@ -1390,6 +1391,15 @@ function WorldZone({ profile, onNavigate }) {
       const canvas = canvasRef.current;
       const ctx = canvas ? canvas.getContext("2d") : null;
       if (ctx) grassPatternRef.current = ctx.createPattern(grassImg, "repeat");
+      markLoaded();
+    };
+
+    const pathImg = new Image();
+    pathImg.src = "/sprites/path.png";
+    pathImg.onload = () => {
+      const canvas = canvasRef.current;
+      const ctx = canvas ? canvas.getContext("2d") : null;
+      if (ctx) pathPatternRef.current = ctx.createPattern(pathImg, "repeat");
       markLoaded();
     };
 
@@ -1516,6 +1526,13 @@ function WorldZone({ profile, onNavigate }) {
       ctx.fillStyle = "#4a3728";
       WALLS.forEach((w) => ctx.fillRect(w.x, w.y, w.w, w.h));
 
+      if (pathPatternRef.current) {
+        ctx.fillStyle = pathPatternRef.current;
+        buildingRects.forEach((b) => {
+          ctx.fillRect(b.door.x - 10, b.door.y, b.door.w + 20, 40);
+        });
+      }
+      
       buildingRects.forEach((b) => {
         const img = buildingImgsRef.current[b.id];
         if (img) {
