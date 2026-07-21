@@ -167,54 +167,37 @@ function AuthScreen() {
   );
 }
 
-const ZONES = [
-  { id: "dorm", label: "🛏 Dorm" },
-  { id: "study", label: "📖 Study" },
-  { id: "break", label: "☕ Break" },
-  { id: "party", label: "👥 Party" },
-  { id: "profile", label: "🪪 Profile" },
-  { id: "world", label: "🕹 World" },
-];
 
 function Dashboard({ session, profile, logs, onLogged }) {
-  const [zone, setZone] = useState("study");
+  const [zone, setZone] = useState("world");
 
   const totalExp = profile?.total_exp ?? 0;
   const progress = getProgressFromExp(totalExp);
   const rank = getCurrentRank(progress.level);
   const nextRank = getNextRank(progress.level);
 
+  if (zone === "world") {
+    return <WorldZone profile={profile} onNavigate={setZone} />;
+  }
+
   return (
     <div className="page" data-theme={profile?.theme || "ember"}>
+      <button className="secondary" onClick={() => setZone("world")} style={{ marginBottom: 16 }}>
+        ← Back to map
+      </button>
+
       <p className="brand">The Will of Focus</p>
       <h1 className="title" style={{ color: getRankStyle(rank.rank).color }}>
-  <span style={{ marginRight: 8 }}>{getRankStyle(rank.rank).symbol}</span>
-  {profile?.display_name || "Loading…"}
-</h1>
-
-      <div className="zone-nav">
-        {ZONES.map((z) => (
-          <button
-            key={z.id}
-            className={`zone-tab ${zone === z.id ? "active" : ""}`}
-            onClick={() => setZone(z.id)}
-          >
-            {z.label}
-          </button>
-        ))}
-      </div>
+        <span style={{ marginRight: 8 }}>{getRankStyle(rank.rank).symbol}</span>
+        {profile?.display_name || "Loading…"}
+      </h1>
 
       {zone === "dorm" && (
         <DormZone progress={progress} rank={rank} nextRank={nextRank} totalExp={totalExp} />
       )}
 
       {zone === "study" && (
-        <StudyZone
-          session={session}
-          totalExp={totalExp}
-          logs={logs}
-          onLogged={onLogged}
-        />
+        <StudyZone session={session} totalExp={totalExp} logs={logs} onLogged={onLogged} />
       )}
 
       {zone === "break" && <BreakZone session={session} />}
@@ -223,14 +206,13 @@ function Dashboard({ session, profile, logs, onLogged }) {
 
       {zone === "profile" && <ProfileZone session={session} profile={profile} onUpdated={onLogged} />}
 
-      {zone === "world" && <WorldZone profile={profile} onNavigate={setZone} />}
-
       <button className="secondary" onClick={() => supabase.auth.signOut()}>
         Log out
       </button>
     </div>
   );
 }
+
 
 function DormZone({ progress, rank, nextRank, totalExp }) {
   return (
@@ -1268,6 +1250,23 @@ const DOORS = [
 ];
 const DOOR_SIZE = 64;
 
+
+  // ── Phase 2b: pixel-art hub, 5 buildings w/ signboards, no tab bar.
+// World is now the home screen; walking to a building's door navigates
+// straight into that real zone. ──
+
+const BUILDINGS = [
+  { id: "dorm", label: "🛏 Dorm", sprite: "/sprites/building_dorm.png", fx: 0.5, fy: 0.18 },
+  { id: "study", label: "📖 Study", sprite: "/sprites/building_study.png", fx: 0.2, fy: 0.4 },
+  { id: "break", label: "☕ Break", sprite: "/sprites/building_break.png", fx: 0.8, fy: 0.4 },
+  { id: "party", label: "👥 Party", sprite: "/sprites/building_party.png", fx: 0.25, fy: 0.78 },
+  { id: "profile", label: "🪪 Profile", sprite: "/sprites/building_profile.png", fx: 0.75, fy: 0.78 },
+];
+const BUILDING_W = 80;
+const BUILDING_H = 100;
+const DOOR_HIT_W = 30;
+const DOOR_HIT_H = 24;
+
 function Joystick({ onChange }) {
   const baseRef = useRef(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
@@ -1343,12 +1342,15 @@ function WorldZone({ profile, onNavigate }) {
   const joystickRef = useRef({ x: 0, y: 0 });
   const playerRef = useRef({ x: 100, y: 100 });
   const avatarImgRef = useRef(null);
+  const grassPatternRef = useRef(null);
+  const buildingImgsRef = useRef({});
+  const assetsReadyRef = useRef(false);
   const lastDoorRef = useRef(null);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
 
   const [dims, setDims] = useState({ width: 360, height: 600 });
-  const PLAYER_SIZE = 28;
+  const PLAYER_SIZE = 26;
   const SPEED = 180;
   const WALL_THICKNESS = 14;
 
@@ -1372,6 +1374,34 @@ function WorldZone({ profile, onNavigate }) {
       avatarImgRef.current = null;
     }
   }, [profile?.avatar_url]);
+
+  // Load grass tile + all building sprites once
+  useEffect(() => {
+    let loaded = 0;
+    const total = 1 + BUILDINGS.length;
+    function markLoaded() {
+      loaded += 1;
+      if (loaded >= total) assetsReadyRef.current = true;
+    }
+
+    const grassImg = new Image();
+    grassImg.src = "/sprites/grass.png";
+    grassImg.onload = () => {
+      const canvas = canvasRef.current;
+      const ctx = canvas ? canvas.getContext("2d") : null;
+      if (ctx) grassPatternRef.current = ctx.createPattern(grassImg, "repeat");
+      markLoaded();
+    };
+
+    BUILDINGS.forEach((b) => {
+      const img = new Image();
+      img.src = b.sprite;
+      img.onload = () => {
+        buildingImgsRef.current[b.id] = img;
+        markLoaded();
+      };
+    });
+  }, []);
 
   useEffect(() => {
     function handleKeyDown(e) {
@@ -1398,10 +1428,10 @@ function WorldZone({ profile, onNavigate }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
     canvas.width = dims.width;
     canvas.height = dims.height;
 
-    // Keep the player inside bounds if the window resized around them
     playerRef.current.x = Math.max(0, Math.min(dims.width - PLAYER_SIZE, playerRef.current.x));
     playerRef.current.y = Math.max(0, Math.min(dims.height - PLAYER_SIZE, playerRef.current.y));
 
@@ -1412,13 +1442,19 @@ function WorldZone({ profile, onNavigate }) {
       { x: dims.width - WALL_THICKNESS, y: 0, w: WALL_THICKNESS, h: dims.height },
     ];
 
-    const doorRects = DOORS.map((d) => ({
-      ...d,
-      x: d.fx * dims.width - DOOR_SIZE / 2,
-      y: d.fy * dims.height - DOOR_SIZE / 2,
-      w: DOOR_SIZE,
-      h: DOOR_SIZE,
-    }));
+    const buildingRects = BUILDINGS.map((b) => {
+      const cx = b.fx * dims.width;
+      const cy = b.fy * dims.height;
+      return {
+        ...b,
+        drawX: cx - BUILDING_W / 2,
+        drawY: cy - BUILDING_H / 2,
+        // Solid body blocks walking through the building itself
+        solid: { x: cx - BUILDING_W / 2 + 6, y: cy - BUILDING_H / 2, w: BUILDING_W - 12, h: BUILDING_H - 16 },
+        // Door hotspot at the base — this is what actually triggers navigation
+        door: { x: cx - DOOR_HIT_W / 2, y: cy + BUILDING_H / 2 - DOOR_HIT_H, w: DOOR_HIT_W, h: DOOR_HIT_H },
+      };
+    });
 
     function rectsOverlap(a, b) {
       return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -1446,9 +1482,10 @@ function WorldZone({ profile, onNavigate }) {
         const normY = (dy / len) * Math.min(len, 1) * SPEED * dt;
 
         const p = playerRef.current;
+        const solids = [...WALLS, ...buildingRects.map((b) => b.solid)];
         const tryMove = (nx, ny) => {
           const box = { x: nx, y: ny, w: PLAYER_SIZE, h: PLAYER_SIZE };
-          return !WALLS.some((w) => rectsOverlap(box, w));
+          return !solids.some((s) => rectsOverlap(box, s));
         };
         if (tryMove(p.x + normX, p.y)) p.x += normX;
         if (tryMove(p.x, p.y + normY)) p.y += normY;
@@ -1457,44 +1494,55 @@ function WorldZone({ profile, onNavigate }) {
         p.y = Math.max(0, Math.min(dims.height - PLAYER_SIZE, p.y));
       }
 
-      // Door detection — navigate away the moment we walk into one
       const p = playerRef.current;
       const playerBox = { x: p.x, y: p.y, w: PLAYER_SIZE, h: PLAYER_SIZE };
-      const hitDoor = doorRects.find((d) => rectsOverlap(playerBox, d));
+      const hitDoor = buildingRects.find((b) => rectsOverlap(playerBox, b.door));
       if (hitDoor && lastDoorRef.current !== hitDoor.id) {
         lastDoorRef.current = hitDoor.id;
         onNavigateRef.current(hitDoor.id);
-        return; // stop this loop; component will unmount as the zone switches
+        return;
       }
       if (!hitDoor) lastDoorRef.current = null;
 
       // ── Draw ──
-      ctx.fillStyle = "#10160f";
-      ctx.fillRect(0, 0, dims.width, dims.height);
-
-      const TILE = 36;
-      for (let ty = 0; ty < dims.height; ty += TILE) {
-        for (let tx = 0; tx < dims.width; tx += TILE) {
-          ctx.fillStyle = (Math.floor(tx / TILE) + Math.floor(ty / TILE)) % 2 === 0 ? "#16201a" : "#131b16";
-          ctx.fillRect(tx, ty, TILE, TILE);
-        }
+      if (grassPatternRef.current) {
+        ctx.fillStyle = grassPatternRef.current;
+        ctx.fillRect(0, 0, dims.width, dims.height);
+      } else {
+        ctx.fillStyle = "#3a6035";
+        ctx.fillRect(0, 0, dims.width, dims.height);
       }
 
-      ctx.fillStyle = "#2a2f3a";
+      ctx.fillStyle = "#4a3728";
       WALLS.forEach((w) => ctx.fillRect(w.x, w.y, w.w, w.h));
 
-      doorRects.forEach((d) => {
-        ctx.fillStyle = "rgba(242,200,121,0.18)";
-        ctx.fillRect(d.x, d.y, d.w, d.h);
-        ctx.strokeStyle = "rgba(242,200,121,0.6)";
+      buildingRects.forEach((b) => {
+        const img = buildingImgsRef.current[b.id];
+        if (img) {
+          ctx.drawImage(img, b.drawX, b.drawY, BUILDING_W, BUILDING_H);
+        } else {
+          ctx.fillStyle = "#8a6642";
+          ctx.fillRect(b.drawX, b.drawY, BUILDING_W, BUILDING_H);
+        }
+
+        // Signboard
+        const signY = b.drawY + BUILDING_H + 6;
+        ctx.font = "bold 12px monospace";
+        const textWidth = ctx.measureText(b.label).width;
+        const signW = textWidth + 16;
+        const signX = b.drawX + BUILDING_W / 2 - signW / 2;
+        ctx.fillStyle = "#caa06a";
+        ctx.fillRect(signX, signY, signW, 20);
+        ctx.strokeStyle = "#5a4028";
         ctx.lineWidth = 2;
-        ctx.strokeRect(d.x, d.y, d.w, d.h);
-        ctx.font = "13px sans-serif";
+        ctx.strokeRect(signX, signY, signW, 20);
+        ctx.fillStyle = "#2a1e14";
         ctx.textAlign = "center";
-        ctx.fillStyle = "#f4f1ea";
-        ctx.fillText(d.label, d.x + d.w / 2, d.y - 8);
+        ctx.textBaseline = "middle";
+        ctx.fillText(b.label, b.drawX + BUILDING_W / 2, signY + 10);
       });
       ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
 
       if (avatarImgRef.current) {
         ctx.save();
@@ -1507,6 +1555,7 @@ function WorldZone({ profile, onNavigate }) {
         ctx.font = `${PLAYER_SIZE}px sans-serif`;
         ctx.textBaseline = "top";
         ctx.fillText(profile?.avatar_id || "🧑‍🎓", p.x, p.y);
+        ctx.textBaseline = "alphabetic";
       }
 
       ctx.font = "bold 12px sans-serif";
@@ -1523,30 +1572,9 @@ function WorldZone({ profile, onNavigate }) {
   }, [dims, profile?.avatar_id, profile?.display_name]);
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "#10160f" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "#3a6035" }}>
       <canvas ref={canvasRef} style={{ display: "block" }} />
-
-      <button
-        onClick={() => onNavigate("dorm")}
-        style={{
-          position: "absolute",
-          top: 20,
-          left: 20,
-          width: 44,
-          height: 44,
-          borderRadius: "50%",
-          background: "rgba(0,0,0,0.45)",
-          border: "1px solid rgba(255,255,255,0.2)",
-          color: "#fff",
-          fontSize: 20,
-          zIndex: 2,
-        }}
-      >
-        ←
-      </button>
-
       <Joystick onChange={(v) => (joystickRef.current = v)} />
     </div>
   );
-           }
-      
+}
